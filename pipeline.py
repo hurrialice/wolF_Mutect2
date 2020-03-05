@@ -6,8 +6,7 @@ from wolf import Task, Workflow, output_helpers
 
 GATK_docker_image = {
   "image": "broadinstitute/gatk",
-  "tag": "4.1.4.1",
-  "user": "root"
+  "tag": "4.1.4.1"
 }
 
 # read the input.json file for configuration
@@ -31,10 +30,7 @@ class Mutect2(Workflow):
         },
         script = [
           "set -euxo pipefail",
-          """
-          export GATK_LOCAL_JAR="/root/gatk.jar"
-          """,
-          
+          "export CLOUDSDK_CONFIG=/etc/gcloud",
           """/gatk/gatk SplitIntervals -R ${ref_fasta} -L ${wes_intervals} \
             --scatter-count ${scatter_count} -O intervals"""
         ],
@@ -56,10 +52,8 @@ class Mutect2(Workflow):
           "user_project" : config["user_project"]
         },
         script = [
-          "set -euxo pipefail", 
-          """
-          export GATK_LOCAL_JAR="/root/gatk.jar"
-          """,
+          "set -euxo pipefail",
+          "export CLOUDSDK_CONFIG=/etc/gcloud",
           "/gatk/gatk GetSampleName -I ${normal_bam} -O normal_name.txt --gcs-project-for-requester-pays ${user_project}",
           "/gatk/gatk GetSampleName -I ${tumor_bam} -O tumor_name.txt --gcs-project-for-requester-pays ${user_project} "
         ],
@@ -93,10 +87,8 @@ class Mutect2(Workflow):
           "interval" : self.split_intervals.get_output("subintervals")
         },
         script = [
-          "set -euxo pipefail", 
-          """
-          export GATK_LOCAL_JAR="/root/gatk.jar"
-          """,
+          "set -euxo pipefail",
+          "export CLOUDSDK_CONFIG=/etc/gcloud",
           """
           /gatk/gatk --java-options "-Xmx${command_mem}" Mutect2 \
             -R ${ref_fasta} \
