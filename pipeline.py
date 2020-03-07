@@ -6,7 +6,8 @@ from wolf import Task, Workflow, output_helpers
 
 GATK_docker_image = {
   "image": "broadinstitute/gatk",
-  "tag": "4.1.4.1"
+  "tag": "4.1.4.1",
+  "extra_flags" : {"volume" : "/home/qing/.config/gcloud:/etc/gcloud" }
 }
 
 # read the input.json file for configuration
@@ -84,11 +85,12 @@ class Mutect2(Workflow):
           "extra_args": config['Mutect2.m2_extra_args'],
           "user_project": config['user_project'],
           "command_mem": config['Mutect2.command_mem'],
-          "interval" : self.split_intervals.get_output("subintervals")
+          "interval" : self.split_intervals.get_output("subintervals", lambda x: x[0])
         },
         script = [
           "set -euxo pipefail",
           "export CLOUDSDK_CONFIG=/etc/gcloud",
+          "echo $interval",
           """
           /gatk/gatk --java-options "-Xmx${command_mem}" Mutect2 \
             -R ${ref_fasta} \
@@ -104,16 +106,18 @@ class Mutect2(Workflow):
           """,
           
           """
-          /gatk/gatk --java-options "-Xmx${command_mem}" GetPileupSummaries -R ~{ref_fasta}\
-            -I ${tumor_bam} --interval-set-rule INTERSECTION -L ${intervals} \
-            -V ${variants_for_contamination} -L ~{variants_for_contamination} \
+          /gatk/gatk --java-options "-Xmx${command_mem}" GetPileupSummaries -R ${ref_fasta}\
+            -I ${tumor_bam} --interval-set-rule INTERSECTION -L ${interval} \
+            -V ${variants_for_contamination} -L ${variants_for_contamination} \
+            --gcs-project-for-requester-pays ${user_project}\
             -O tumor-pileups.table
           """,
           
           """
-          /gatk/gatk --java-options "-Xmx${command_mem}" GetPileupSummaries -R ~{ref_fasta}\
-            -I ${normal_bam} --interval-set-rule INTERSECTION -L ${intervals} \
+          /gatk/gatk --java-options "-Xmx${command_mem}" GetPileupSummaries -R ${ref_fasta}\
+            -I ${normal_bam} --interval-set-rule INTERSECTION -L ${interval} \
             -V ${variants_for_contamination} -L ${variants_for_contamination}\
+            --gcs-project-for-requester-pays ${user_project}\
             -O normal-pileups.table
           """
         ],
