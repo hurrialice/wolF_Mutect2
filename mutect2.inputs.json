@@ -25,5 +25,6 @@
   "Mutect2.variants_for_contamination_idx": "gs://gatk-best-practices/somatic-b37/small_exac_common_3.vcf.idx",
   "Mutect2.realignment_index_bundle": "gs://gatk-test-data/mutect2/Homo_sapiens_assembly38.index_bundle",
   "user_project": "broad-cga-qing-gdac",
+  "onco_folder": "xxxx"
   "Mutect2.command_mem": "4g"
 }

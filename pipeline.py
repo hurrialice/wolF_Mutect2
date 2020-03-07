@@ -99,7 +99,7 @@ class Mutect2(Workflow):
             --germline-resource ${gnomad} \
             -pon ${default_pon} \
             -L  ${interval} \
-            -O {scatter.vcf} \
+            -O scatter.vcf \
             --f1r2-tar-gz f1r2.tar.gz \
             --gcs-project-for-requester-pays ${user_project}\
             ${extra_args}
@@ -122,7 +122,7 @@ class Mutect2(Workflow):
           """
         ],
         outputs = {
-          "scatter-vcf": "scatter.vcf*",
+          "scatter_vcf": "scatter.vcf*",
           "tpile": "tumor-pileups.table",
           "npile": "normal-pileups.table",
           "f1r2": "f1r2.tar.gz"
@@ -143,12 +143,151 @@ class Mutect2(Workflow):
         docker = GATK_docker_image,
         dependencies = [self.split_intervals, self.get_sample_name]
       )
-      # self.calc_contam = Task(
-      #   name = "calculate_contamination",
-      #   inputs={
-      #     "all_tumor_pile_input": self.M2.get_output("tpile").
-      #   }
-      # )
+      self.calc_contam = Task(
+        name = "calculate_contamination",
+        inputs={
+          "all_tumor_pile_input": self.M2.get_output("tpile", lambda x: "-I" + " -I ".join(x)),
+          "all_normal_pile_input": self.M2.get_output("npile", lambda x: "-I" + " -I ".join(x)),
+          "seq_dict": config['Mutect2.ref_dict']
+        },
+        script=[
+          """
+          /gatk/gatk --java-options -Xmx2g GatherPileupSummaries -I ${all_tumor_pile_input} \
+            --sequence-dictionary ${seq_dict} -O tumor_pile.tsv
+          """,
+          """
+          /gatk/gatk --java-options -Xmx2g GatherPileupSummaries -I ${all_normal_pile_input} \
+            --sequence-dictionary ${seq_dict} -O normal_pile.tsv
+          """,
+          """
+          /gatk/gatk --java-options -Xmx2g CalculateContamination \
+            -I tumor_pile.tsv -O contamination.table \
+            --tumor-segmentation segments.table \
+            -matched normal_pile.tsv
+          """
+        ],
+        overrides={
+          "seq_dict": None
+        },
+        outputs={
+          "contamination": "contamination.table",
+          "segments": "segments.table",
+          "tumor_pile_table" : "tumor_pile.tsv",
+          "normal_pile_table" : "normal_pile.tsv"
+        },
+        dependencies=self.M2)
+      
+      self.merge_M2 = Task(
+        name="merge_m2",
+        inputs={
+          "ref_fasta": config["Mutect2.ref_fasta"],
+          "contamination_table": self.calc_contam.get_output("contamination"),
+          "segments_table": self.calc_contam.get_output("segments"),
+          "all_f1r2_input": self.M2.get_output("f1r2", lambda x: " -I ".join(x)),
+          "all_vcf_input": self.M2.get_output("scatter_vcf", lambda x: " -I ".join([i for i in x if i.endswith("vcf")][0])),
+          "all_stats_input": self.M2.get_output("scatter_vcf", lambda x: " -stats ".join([i for i in x if i.endswith("vcf.stats")][0]))
+        },
+        script=[
+          """
+        gatkm="/gatk/gatk --java-options -Xmx4g"
+        echo "-----------------------learn read orientation model-----------------------"
+        $gatkm LearnReadOrientationModel \
+            -I ${all_f1r2_input} \
+            -O artifact_prior.tar.gz 
+        echo "----------------------- merge vcfs----------------------------"
+        $gatkm MergeVcfs \
+            -I ${all_vcf_input} \
+            -O merged_unfiltered.vcf
+        echo "------------------------merge mutect stats-------------------------------"
+        $gatkm MergeMutectStats \
+            -stats ${all_stats_input} \
+            -O merged.stats
+        echo --------------filter mutect stats ----------------
+        $gatkm FilterMutectCalls \
+            -V merged_unfiltered.vcf \
+            -R ${ref_fasta} \
+            --contamination-table ${contamination_table} \
+            --tumor-segmentation ${segments_table} \
+            --ob-priors artifact-priors.tar.gz \
+            -stats merged.stats \
+            --filtering-stats filtering.stats \
+            -O merged_filtered.vcf 
+        
+        """
+        ],
+        overrides={
+          "ref_fasta": None,
+          "all_vcf_input": None,
+          "all_stats_input": None,
+          "all_f1r2_input": None
+        },
+        outputs={
+          "merged_filtered_vcf": "merged_filtered.vcf*"
+        },
+        dependencies=[self.M2, self.calc_contam]
+        )
+      
+      self.funcotate = Task(
+        name = "funcotate",
+        inputs={
+          "merged_filtered_vcf": self.merge_M2.get_output("merged_filtered_vcf", lambda x: [i for i in x if i.endswith("vcf")][0]),
+          "data_source_folder":config["onco_folder"],
+          "ref_fasta": config["Mutect2.ref_fasta"],
+          "interval_list": config["Mutect2.intervals"]
+        },
+        script=[
+          """
+          gatkm="/gatk/gatk --java-options -Xmx10g"
+          echo "-----------------------annotate-----------------------"
+          $gatkm Funcotator \
+            --data-sources-path ${data_source_folder} \
+            --ref-version hg19 \
+            --output-file-format MAF \
+            -R ${ref_fasta} \
+            -V ${merged_filtered_vcf} \
+            -O annot_merged_filtered.maf \
+            -L ${interval_list} \
+            --remove-filtered-variants true 
+          """
+        ],
+        overrides={
+          "data_source_folder": None,
+          "ref_fasta": None,
+          "interval_list": None,
+          "merged_filtered_vcf":None
+        },
+        outputs={
+          "annot":"annot_merged_filtered.maf"
+        },
+        dependencies=self.merge_M2
+      )
+        
+        
+  #               """
+  #       gatkm="gatk --java-options -Xmx{params.heap_mem}g"
+  #       echo "-----------------------gather pile up summaries-----------------------"
+  #       $gatkm GatherPileupSummaries \
+  #           -I {params.all_normal_piles_input} \
+  #           --sequence-dictionary "/demo-mount/M2_refs/Homo_sapiens_assembly19.dict" \
+  #           -O {output.normal_pile_table} &> {log}
+  #       echo "-----------------------gather tumor piles-----------------------"
+  #       $gatkm GatherPileupSummaries \
+  #           -I {params.all_tumor_piles_input} \
+  #           --sequence-dictionary "/demo-mount/M2_refs/Homo_sapiens_assembly19.dict" \
+  #           -O {output.tumor_pile_table} &>> {log}
+  #       echo "-----------------------calc contamination-----------------------"
+  #       $gatkm CalculateContamination \
+  #           -I {output.tumor_pile_table} \
+  #           -O {output.contamination_table} \
+  #           --tumor-segmentation {output.segments_table} \
+  #           -matched {output.normal_pile_table} &>> {log}
+        
+	# """
+ 
+ 
+ 
+ 
+      )
       
 
 
