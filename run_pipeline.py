@@ -14,7 +14,9 @@ with pipeline.Mutect2() as w:
 	n_bam_cloud_path = "gs://5aa919de-0aa0-43ec-9ec3-288481102b6d-temp/tcga/ACC/DNA/WXS/BI/ILLUMINA/TCGA_MC3.TCGA-OR-A5J7-01A-11D-A29I-10.bam",
 
 	# a string for the name of the pair under analysis (used for naming output files)
-	pairName = "OR-A5J7"
+	run_name = "ACC_OR-A5J7",
+ 	# a project to bill for accessing requester-pay buckets
+	user_project = "broad-cga-qing-gdac"
 	)
 
 #

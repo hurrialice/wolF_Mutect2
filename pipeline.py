@@ -15,19 +15,21 @@ class Mutect2(Workflow):
 
     def workflow(self, 
       t_bam_cloud_path, n_bam_cloud_path,
-      pairName):
+      user_project):
       
       with open('mutect2.inputs.json', 'r') as f:
         config  = json.load(f)
+      
+      ref_path = config["ref_local_path"]
       
       
       self.split_intervals = Task(
         name = "split_intervals",
         inputs = {
-          "ref_fasta": config["Mutect2.ref_fasta"],
+          "ref_fasta": ref_path + config["Mutect2.ref_fasta"],
           "scatter_count" : config['Mutect2.scatter_count'],
-          "wes_intervals" : config['Mutect2.intervals'],
-          "user_project": config['user_project']
+          "wes_intervals" : ref_path + config['Mutect2.intervals'],
+          "user_project": user_project
         },
         script = [
           "set -euxo pipefail",
@@ -50,7 +52,7 @@ class Mutect2(Workflow):
         inputs = {
           "tumor_bam" : t_bam_cloud_path,
           "normal_bam" : n_bam_cloud_path,
-          "user_project" : config["user_project"]
+          "user_project" : user_project
         },
         script = [
           "set -euxo pipefail",
@@ -74,17 +76,17 @@ class Mutect2(Workflow):
       self.M2 = Task(
         name="scatter_m2",
         inputs={
-          "ref_fasta": config['Mutect2.ref_fasta'],
-          "gnomad": config['Mutect2.gnomad'],
-          "default_pon": config['Mutect2.pon'],
-          "variants_for_contamination": config['Mutect2.variants_for_contamination'],
+          "ref_fasta": ref_path + config['Mutect2.ref_fasta'],
+          "gnomad": ref_path + config['Mutect2.gnomad'],
+          "default_pon": ref_path + config['Mutect2.pon'],
+          "variants_for_contamination": ref_path + config['Mutect2.variants_for_contamination'],
           "tumor_bam": t_bam_cloud_path,
           "normal_bam": n_bam_cloud_path,
           "tumor_name": self.get_sample_name.get_output("tumor_name"),
           "normal_name": self.get_sample_name.get_output("normal_name"),
           "extra_args": config['Mutect2.m2_extra_args'],
-          "user_project": config['user_project'],
-          "command_mem": config['Mutect2.command_mem'],
+          "user_project": user_project,
+          "command_mem": "4",
           "interval" : self.split_intervals.get_output("subintervals", lambda x: x[0])
         },
         script = [
@@ -92,7 +94,7 @@ class Mutect2(Workflow):
           "export CLOUDSDK_CONFIG=/etc/gcloud",
           "echo $interval",
           """
-          /gatk/gatk --java-options "-Xmx${command_mem}" Mutect2 \
+          /gatk/gatk --java-options "-Xmx${command_mem}g" Mutect2 \
             -R ${ref_fasta} \
             -I ${tumor_bam} -tumor ${tumor_name} \
             -I ${normal_bam} -normal ${normal_name} \
@@ -106,7 +108,7 @@ class Mutect2(Workflow):
           """,
           
           """
-          /gatk/gatk --java-options "-Xmx${command_mem}" GetPileupSummaries -R ${ref_fasta}\
+          /gatk/gatk --java-options "-Xmx${command_mem}g" GetPileupSummaries -R ${ref_fasta}\
             -I ${tumor_bam} --interval-set-rule INTERSECTION -L ${interval} \
             -V ${variants_for_contamination} -L ${variants_for_contamination} \
             --gcs-project-for-requester-pays ${user_project}\
@@ -114,7 +116,7 @@ class Mutect2(Workflow):
           """,
           
           """
-          /gatk/gatk --java-options "-Xmx${command_mem}" GetPileupSummaries -R ${ref_fasta}\
+          /gatk/gatk --java-options "-Xmx${command_mem}g" GetPileupSummaries -R ${ref_fasta}\
             -I ${normal_bam} --interval-set-rule INTERSECTION -L ${interval} \
             -V ${variants_for_contamination} -L ${variants_for_contamination}\
             --gcs-project-for-requester-pays ${user_project}\
@@ -133,12 +135,8 @@ class Mutect2(Workflow):
             "cpus-per-task" : 1
         },
         overrides={
-          "ref_fasta": None,
-          "variants_for_contamination": None,
-          "gnomad": None,
           "normal_bam": None,
-          "tumor_bam": None,
-          "default_pon": None
+          "tumor_bam": None
         },
         docker = GATK_docker_image,
         dependencies = [self.split_intervals, self.get_sample_name]
@@ -148,7 +146,7 @@ class Mutect2(Workflow):
         inputs={
           "all_tumor_pile_input": self.M2.get_output("tpile", lambda x: " -I ".join(x)),
           "all_normal_pile_input": self.M2.get_output("npile", lambda x: " -I ".join(x)),
-          "seq_dict": config['Mutect2.ref_dict']
+          "seq_dict": ref_path + config['Mutect2.ref_dict']
         },
         script=[
           "set -euxo pipefail",
@@ -167,11 +165,6 @@ class Mutect2(Workflow):
             -matched normal_pile.tsv
           """
         ],
-        overrides={
-          "seq_dict": None,
-          "all_tumor_pile_input": None,
-          "all_normal_pile_input": None
-        },
         outputs={
           "contamination": "contamination.table",
           "segments": "segments.table",
@@ -184,7 +177,7 @@ class Mutect2(Workflow):
       self.merge_M2 = Task(
         name="merge_m2",
         inputs={
-          "ref_fasta": config["Mutect2.ref_fasta"],
+          "ref_fasta": ref_path + config["Mutect2.ref_fasta"],
           "contamination_table": self.calc_contam.get_output("contamination"),
           "segments_table": self.calc_contam.get_output("segments"),
           "all_f1r2_input": self.M2.get_output("f1r2", lambda x: " -I ".join(x)),
@@ -220,12 +213,6 @@ class Mutect2(Workflow):
         
         """
         ],
-        overrides={
-          "ref_fasta": None,
-          "all_vcf_input": None,
-          "all_stats_input": None,
-          "all_f1r2_input": None
-        },
         outputs={
           "merged_filtered_vcf": "merged_filtered.vcf*"
         },
@@ -238,18 +225,14 @@ class Mutect2(Workflow):
         inputs = {
           "command_mem": 2, 
           "bam": t_bam_cloud_path,
-          "ref_fasta": config["Mutect2.ref_fasta"],
+          "ref_fasta": ref_path + config["Mutect2.ref_fasta"],
           "input_vcf": self.merge_M2.get_output("merged_filtered_vcf", lambda x: [i for i in x[0] if i.endswith("vcf")][0]),
-          "realignment_index_bundle": config["Mutect2.realignment_index_bundle"],
-          "user_project" : config["user_project"]
+          "realignment_index_bundle": ref_path + config["Mutect2.realignment_index_bundle"],
+          "user_project" : user_project
         },
         overrides={
-          "command_mem": None,
           "bam" : None,
-          "input_vcf": None,
-          "ref_fasta": None,
-          "realignment_index_bundle": None,
-          "user_project": None
+          "input_vcf": None
         },
         script=[
           """
@@ -275,10 +258,10 @@ class Mutect2(Workflow):
         name = "funcotate",
         inputs={
           "merged_filtered_vcf": self.merge_M2.get_output("merged_filtered_vcf", lambda x: [i for i in x[0] if i.endswith("vcf")]),
-          "data_source_folder":config["onco_folder"],
-          "ref_fasta": config["Mutect2.ref_fasta"],
-          "interval_list": config["Mutect2.intervals"],
-          "transcript_selection": config["Mutect2.funco_transcript_selection_list"]
+          "data_source_folder":ref_path + config["onco_folder"],
+          "ref_fasta": ref_path + config["Mutect2.ref_fasta"],
+          "interval_list": ref_path + config["Mutect2.intervals"],
+          "transcript_selection": ref_path + config["Mutect2.funco_transcript_selection_list"]
         },
         script=[
           """
@@ -297,11 +280,7 @@ class Mutect2(Workflow):
           """
         ],
         overrides={
-          "data_source_folder": None,
-          "ref_fasta": None,
-          "interval_list": None,
-          "merged_filtered_vcf":None,
-          "transcript_selection": None
+          "merged_filtered_vcf":None
         },
         outputs={
           "annot":"annot_merged_filtered.maf"
