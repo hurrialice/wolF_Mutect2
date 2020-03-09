@@ -146,11 +146,12 @@ class Mutect2(Workflow):
       self.calc_contam = Task(
         name = "calculate_contamination",
         inputs={
-          "all_tumor_pile_input": self.M2.get_output("tpile", lambda x: "-I" + " -I ".join(x)),
-          "all_normal_pile_input": self.M2.get_output("npile", lambda x: "-I" + " -I ".join(x)),
+          "all_tumor_pile_input": self.M2.get_output("tpile", lambda x: " -I ".join(x)),
+          "all_normal_pile_input": self.M2.get_output("npile", lambda x: " -I ".join(x)),
           "seq_dict": config['Mutect2.ref_dict']
         },
         script=[
+          "set -euxo pipefail",
           """
           /gatk/gatk --java-options -Xmx2g GatherPileupSummaries -I ${all_tumor_pile_input} \
             --sequence-dictionary ${seq_dict} -O tumor_pile.tsv
@@ -167,7 +168,9 @@ class Mutect2(Workflow):
           """
         ],
         overrides={
-          "seq_dict": None
+          "seq_dict": None,
+          "all_tumor_pile_input": None,
+          "all_normal_pile_input": None
         },
         outputs={
           "contamination": "contamination.table",
@@ -175,6 +178,7 @@ class Mutect2(Workflow):
           "tumor_pile_table" : "tumor_pile.tsv",
           "normal_pile_table" : "normal_pile.tsv"
         },
+        docker = GATK_docker_image,
         dependencies=self.M2)
       
       self.merge_M2 = Task(
@@ -184,16 +188,17 @@ class Mutect2(Workflow):
           "contamination_table": self.calc_contam.get_output("contamination"),
           "segments_table": self.calc_contam.get_output("segments"),
           "all_f1r2_input": self.M2.get_output("f1r2", lambda x: " -I ".join(x)),
-          "all_vcf_input": self.M2.get_output("scatter_vcf", lambda x: " -I ".join([i for i in x if i.endswith("vcf")][0])),
-          "all_stats_input": self.M2.get_output("scatter_vcf", lambda x: " -stats ".join([i for i in x if i.endswith("vcf.stats")][0]))
+          "all_vcf_input": self.M2.get_output("scatter_vcf", lambda x: " -I ".join([i for i in x[0] if i.endswith("vcf")])),
+          "all_stats_input": self.M2.get_output("scatter_vcf", lambda x: " -stats ".join([i for i in x[0] if i.endswith("vcf.stats")]))
         },
         script=[
+          "set -euxo pipefail",
           """
         gatkm="/gatk/gatk --java-options -Xmx4g"
         echo "-----------------------learn read orientation model-----------------------"
         $gatkm LearnReadOrientationModel \
             -I ${all_f1r2_input} \
-            -O artifact_prior.tar.gz 
+            -O artifact-priors.tar.gz 
         echo "----------------------- merge vcfs----------------------------"
         $gatkm MergeVcfs \
             -I ${all_vcf_input} \
@@ -224,16 +229,56 @@ class Mutect2(Workflow):
         outputs={
           "merged_filtered_vcf": "merged_filtered.vcf*"
         },
+        docker = GATK_docker_image,
         dependencies=[self.M2, self.calc_contam]
         )
+      
+      self.realignment = Task(
+        name = "realignment",
+        inputs = {
+          "command_mem": 2, 
+          "bam": t_bam_cloud_path,
+          "ref_fasta": config["Mutect2.ref_fasta"],
+          "input_vcf": self.merge_M2.get_output("merged_filtered_vcf", lambda x: [i for i in x[0] if i.endswith("vcf")][0]),
+          "realignment_index_bundle": config["Mutect2.realignment_index_bundle"],
+          "user_project" : config["user_project"]
+        },
+        overrides={
+          "command_mem": None,
+          "bam" : None,
+          "input_vcf": None,
+          "ref_fasta": None,
+          "realignment_index_bundle": None,
+          "user_project": None
+        },
+        script=[
+          """
+          set -euxo pipefail
+          export CLOUDSDK_CONFIG=/etc/gcloud
+          /gatk/gatk --java-options "-Xmx${command_mem}g" FilterAlignmentArtifacts \
+            -V ${input_vcf} -R ${ref_fasta} \
+            -I ${bam} --gcs-project-for-requester-pays ${user_project} \
+            --bwa-mem-index-image ${realignment_index_bundle} \
+            -O realigned_filtered.vcf
+          """
+        ],
+        outputs={
+          "realigned_vcf": "realigned_filtered.vcf*"
+        },
+        dependencies=self.merge_M2,
+        docker=GATK_docker_image
+      )
+      
+      
       
       self.funcotate = Task(
         name = "funcotate",
         inputs={
-          "merged_filtered_vcf": self.merge_M2.get_output("merged_filtered_vcf", lambda x: [i for i in x if i.endswith("vcf")][0]),
+          "merged_filtered_vcf": self.merge_M2.get_output("merged_filtered_vcf", lambda x: [i for i in x[0] if i.endswith("vcf")]),
           "data_source_folder":config["onco_folder"],
           "ref_fasta": config["Mutect2.ref_fasta"],
-          "interval_list": config["Mutect2.intervals"]
+          "interval_list": config["Mutect2.intervals"],
+          "transcript_selection": config["Mutect2.funco_transcript_selection_list"]
         },
         script=[
           """
@@ -247,19 +292,22 @@ class Mutect2(Workflow):
             -V ${merged_filtered_vcf} \
             -O annot_merged_filtered.maf \
             -L ${interval_list} \
-            --remove-filtered-variants true 
+             --transcript-list ${transcript_selection} \
+            --remove-filtered-variants true
           """
         ],
         overrides={
           "data_source_folder": None,
           "ref_fasta": None,
           "interval_list": None,
-          "merged_filtered_vcf":None
+          "merged_filtered_vcf":None,
+          "transcript_selection": None
         },
         outputs={
           "annot":"annot_merged_filtered.maf"
         },
-        dependencies=self.merge_M2
+        docker = GATK_docker_image,
+        dependencies=self.realignment
       )
         
         
