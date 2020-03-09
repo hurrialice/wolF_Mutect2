@@ -7,7 +7,14 @@ from wolf import *
 #
 # Example code for running the WES pipeline on a single pair
 
-with pipeline.Mutect2() as w:
+with pipeline.Mutect2(
+		# use NFS image preloaded with reference files
+		conf = {
+			"nfs_image" : "mutect2-wolf",
+			"nfs_image_project" : "broad-cga-qing-gdac"
+		}
+    ) as w:
+    
 	w.run(
 	# paths to tumor/normal BAMs and BAIs in cloud storage
 	t_bam_cloud_path = "gs://5aa919de-0aa0-43ec-9ec3-288481102b6d-temp/tcga/ACC/DNA/WXS/BI/ILLUMINA/TCGA_MC3.TCGA-OR-A5J7-10A-01D-A29L-10.bam",
