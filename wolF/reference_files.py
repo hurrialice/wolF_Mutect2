@@ -6,7 +6,7 @@ m2_ref_files = {
         "fasta_dict": "gs://getzlab-workflows-reference_files-oa/hg38/gdc/GRCh38.d1.vd1.dict",
         
         "gnomad_vcf": "gs://gatk-best-practices/somatic-hg38/af-only-gnomad.hg38.vcf.gz",
-        "pon_vcf": "gs://gatk-best-practices/somatic-hg38/1000g_pon.hg38.vcf.gz"0,
+        "pon_vcf": "gs://gatk-best-practices/somatic-hg38/1000g_pon.hg38.vcf.gz",
         "contamination_variants_vcf": "gs://gatk-best-practices/somatic-hg38/small_exac_common_3.hg38.vcf.gz",
 
         "WGS": {
