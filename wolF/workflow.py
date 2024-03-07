@@ -25,31 +25,46 @@ def mutect2_workflow(pair_name, t_name, n_name,
                      ref_build="hg38",
                      sequencing_type="WGS",
                      scatter_count=10,
-                     **kwargs):
+                     ref_files_override={},
+                     ):
 
     ref_files = m2_ref_files[ref_build]
     ref_files = {**ref_files, **ref_files[sequencing_type]}
-    ref_files = {**ref_files, **kwargs}
+    ref_files = {**ref_files, **ref_files_override}
 
     results = {}
 
     # Split intervals
     intervals = SplitIntervals(inputs=dict(ref_fasta=ref_files["fasta"],
+                                           ref_fasta_index=ref_files["fasta_idx"],
+                                           ref_fasta_dict=ref_files["fasta_dict"],
                                            interval_list=ref_files["split_intervals"], 
-                                           scatter_count=scatter_count))["subintervals"]
+                                           scatter_count=scatter_count
+                                          )
+                              )["subintervals"]
+
+    # Get the sample names from the BAMs
+    sample_names = GetSampleNames(inputs=dict(tumor_bam=t_bam,
+                                              normal_bam=n_bam
+                                             )
+                                 )
 
     # MuTect2 scatter          
-    m2_outputs = Mutect2(inputs=dict(pair_name=pair_name,
-                                     case_name=t_name,
-                                     ctrl_name=n_name,
+    m2_outputs = Mutect2(inputs=dict(case_name=sample_names["tumor_name"],
+                                     ctrl_name=sample_names["normal_name"],
                                      t_bam=t_bam, 
                                      t_bai=t_bai,
                                      n_bam=n_bam, 
                                      n_bai=n_bai,
                                      ref_fasta=ref_files["fasta"],
+                                     ref_fasta_index=ref_files["fasta_idx"],
+                                     ref_fasta_dict=ref_files["fasta_dict"],
                                      gnomad_vcf=ref_files["gnomad_vcf"],
+                                     gnomad_vcf_idx=ref_files["gnomad_vcf_idx"],
                                      pon_vcf=ref_files["pon_vcf"],
-                                     interval=intervals)
+                                     pon_vcf_idx=ref_files["pon_vcf_idx"],
+                                     interval=intervals
+                                    )
                          )
 
     # MuTect2 gather

@@ -2,20 +2,23 @@
 import json
 import pandas as pd
 
-from wolf import Task
+from wolf import Task, ReadFile
 
-GATK_docker_image = {
-  "image": "broadinstitute/gatk",
-  "tag": "4.1.4.1",
-  "extra_flags" : {"volume" : "/home/qing/.config/gcloud:/etc/gcloud" }
-}
+#GATK_docker_image = {
+#  "image": "broadinstitute/gatk",
+#  "tag": "4.1.4.1",
+#  "extra_flags" : {"volume" : "/home/qing/.config/gcloud:/etc/gcloud" }
+#}
 
+GATK_docker_image = 'gcr.io/broad-getzlab-workflows/gatk4_wolf:v6'
 
 class SplitIntervals(Task):
     name = "SplitIntervals"
 
     inputs = {
       "ref_fasta": None,
+      "ref_fasta_index": None,
+      "ref_fasta_dict": None,
       "interval_list" : None, # .list, .intervals, .bed, or .vcf
       "scatter_count" : 10,
     }
@@ -23,7 +26,11 @@ class SplitIntervals(Task):
     script = """
         set -euxo pipefail
 
-        /gatk/gatk SplitIntervals -R ${ref_fasta} -L ${interval_list} \
+        ln -s ${ref_fasta} refbuild.fa
+        ln -s ${ref_fasta_index} refbuild.fa.fai
+        ln -s ${ref_fasta_dict} refbuild.dict
+
+        gatk SplitIntervals -R refbuild.fa -L ${interval_list} \
           --scatter-count ${scatter_count} -O intervals
          """
     
@@ -34,17 +41,40 @@ class SplitIntervals(Task):
     docker = GATK_docker_image
 
 
+class GetSampleNames(Task):
+    name="GATK_GetSampleNames"
+
+    inputs={"tumor_bam" : None,
+            "normal_bam" : None
+    }
+
+    script = """
+        set -euxo pipefail
+        gatk GetSampleName -I ${normal_bam} -O normal_name.txt 
+        gatk GetSampleName -I ${tumor_bam} -O tumor_name.txt 
+    """
+
+    outputs = {"normal_name": ("normal_name.txt", ReadFile),
+               "tumor_name" : ("tumor_name.txt", ReadFile)
+               }
+    
+    docker = GATK_docker_image
+
+
 class Mutect2(Task):
     name="Mutect2"
     inputs={
-        "pair_name": None,
         "case_name": None,
         "ctrl_name": None,
         "t_bam": None, "t_bai": None,
         "n_bam": None, "n_bai": None,
         "ref_fasta": None,
+        "ref_fasta_index": None,
+        "ref_fasta_dict": None,
         "gnomad_vcf": None,
+        "gnomad_vcf_idx": None,
         "pon_vcf": None,
+        "pon_vcf_idx": None,
         "command_mem": "4",
         "interval" : "",
         "extra_args": ""
@@ -54,19 +84,48 @@ class Mutect2(Task):
         set -euxo pipefail
 
         # Figure out whether a set of intervals was provided
-        if test $interval
+        if test ${interval}
         then
-            interval="-L $interval"
+            interval_str="-L ${interval}"
+        else
+            interval_str=""
         fi
+        
+        # Make sure reference fasta/fai/dict are set up correctly
+        ln -s ${ref_fasta} refbuild.fa
+        ln -s ${ref_fasta_index} refbuild.fa.fai
+        ln -s ${ref_fasta_dict} refbuild.dict
 
-        echo $interval
-        /gatk/gatk --java-options "-Xmx${command_mem}g" Mutect2 \
-            -R ${ref_fasta} \
-            -I ${tumor_bam} -tumor ${tumor_name} \
-            -I ${normal_bam} -normal ${normal_name} \
-            --germline-resource ${gnomad} \
-            -pon ${default_pon} \
-            ${interval} \
+        # Make sure the bams/bais are named correctly
+        ln -s ${t_bam} tumor.bam
+        ln -s ${t_bai} tumor.bam.bai
+        ln -s ${n_bam} normal.bam
+        ln -s ${n_bai} normal.bam.bai
+
+        # Make sure PoN VCF/index are set up correctly
+        pon_ext=${pon_vcf#*.}
+        pon_path="pon.${pon_ext}"
+        ln -s ${pon_vcf} ${pon_path}
+        
+        pon_idx_ext=${pon_vcf_idx#*.}
+        ln -s ${pon_vcf_idx} pon.${pon_idx_ext}
+
+        # Make sure the gnomAD VCF/index are set up correctly
+        gnomad_ext=${gnomad_vcf#*.}
+        gnomad_path="gnomad.${gnomad_ext}"
+        ln -s ${gnomad_vcf} ${gnomad_path}
+
+        gnomad_idx_ext=${gnomad_vcf_idx#*.}
+        ln -s ${gnomad_vcf_idx} gnomad.${gnomad_idx_ext}
+
+        echo ${interval}
+        gatk --java-options "-Xmx${command_mem}g" Mutect2 \
+            -R refbuild.fa \
+            -I tumor.bam -tumor ${case_name} \
+            -I normal.bam -normal ${ctrl_name} \
+            --germline-resource ${gnomad_path} \
+            -pon ${pon_path} \
+            ${interval_str} \
             -O scatter.vcf \
             --f1r2-tar-gz f1r2.tar.gz \
             ${extra_args}
@@ -89,7 +148,7 @@ class GatherMutect2(Task):
     inputs = {"all_vcf_input": None}
 
     script = """
-        $gatkm MergeVcfs \
+        gatk MergeVcfs \
             -I ${all_vcf_input} \
             -O merged_unfiltered.vcf
     """
