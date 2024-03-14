@@ -10,8 +10,8 @@ m2_ref_files = {
         "gnomad_vcf_idx": "gs://gatk-best-practices/somatic-hg38/af-only-gnomad.hg38.vcf.gz.tbi",
         "pon_vcf": "gs://gatk-best-practices/somatic-hg38/1000g_pon.hg38.vcf.gz",
         "pon_vcf": "gs://gatk-best-practices/somatic-hg38/1000g_pon.hg38.vcf.gz.tbi",
-        "contamination_variants_vcf": "gs://gatk-best-practices/somatic-hg38/small_exac_common_3.hg38.vcf.gz",
-        "contamination_variants_vcf_idx": "gs://gatk-best-practices/somatic-hg38/small_exac_common_3.hg38.vcf.gz.tbi",
+        "contamination_vcf": "gs://gatk-best-practices/somatic-hg38/small_exac_common_3.hg38.vcf.gz",
+        "contamination_vcf_idx": "gs://gatk-best-practices/somatic-hg38/small_exac_common_3.hg38.vcf.gz.tbi",
 
         "WGS": {
             "split_intervals": "gs://getzlab-workflows-reference_files-oa/hg38/final_hg38_wgs_masked_intervals.bed",
@@ -29,8 +29,8 @@ m2_ref_files = {
         # TODO: gnomAD seems old, ca. 2017
         "gnomad_vcf": "gs://gatk-best-practices/somatic-b37/af-only-gnomad.raw.sites.vcf",
         "gnomad_vcf_idx": "gs://gatk-best-practices/somatic-b37/af-only-gnomad.raw.sites.vcf.idx",
-        "contamination_variants_vcf": "gs://gatk-best-practices/somatic-b37/small_exac_common_3.vcf",
-        "contamination_variants_vcf_idx": "gs://gatk-best-practices/somatic-b37/small_exac_common_3.vcf.idx",
+        "contamination_vcf": "gs://gatk-best-practices/somatic-b37/small_exac_common_3.vcf",
+        "contamination_vcf_idx": "gs://gatk-best-practices/somatic-b37/small_exac_common_3.vcf.idx",
         
         "WGS": {
             "split_intervals": "gs://broad-getzlab-wolf-wgs-hg19/additional_refs/M2.interval.CytoBand.acen.Blacklist.mask.12Oct2016.bed",

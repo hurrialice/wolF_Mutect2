@@ -143,7 +143,7 @@ class Mutect2(Task):
     docker = GATK_docker_image
 
 
-class GatherMutect2(Task):
+class MergeVCFs(Task):
    
     inputs = {"all_vcf_input": None}
 
@@ -158,15 +158,124 @@ class GatherMutect2(Task):
     docker = GATK_docker_image
 
 
-
 class GetPileupSummaries(Task):
-    pass
+    
+    inputs = {
+        "bam": None, "bai": None,
+        "ref_fasta": None,
+        "ref_fasta_index": None,
+        "ref_fasta_dict": None,
+        "contamination_vcf": None,
+        "contamination_vcf_idx": None,
+        "interval" : "",
+        "command_mem": "4",
+    }
+
+    script = """
+        set -euxo
+        
+        # Figure out whether a set of intervals was provided
+        if test ${interval}
+        then
+            interval_str="-L ${interval}"
+        else
+            interval_str=""
+        fi
+
+        # Enforce BAM/BAI naming conventions
+        ln -s ${bam} input.bam
+        ln -s ${bai} input.bai
+
+        # Enforce FASTA naming conventions
+        ln -s ${ref_fasta} ref.fa
+        ln -s ${ref_fasta_index} ref.fa.fai
+        ln -s ${ref_fasta_dict} ref.dict
+
+        # Enforce VCF index naming conventions
+        contam_ext=${contamination_vcf#*.}
+        contamination_vcf_path="contam.$contam_ext"
+        ln -s ${contamination_vcf} ${contamination_vcf_path}
+
+        contam_idx_ext=${contamination_vcf_idx#*.}
+        ln -s ${contamination_vcf_idx} contam.${contam_idx_ext}
+
+        # Finally: run GATK GetPileupSummaries
+        gatk --java-options "-Xmx${command_mem}g" GetPileupSummaries -R ref.fa \
+          -I ${bam} --interval-set-rule INTERSECTION \
+          ${interval_str} \
+          -V ${contamination_vcf_path} -L ${contamination_vcf_path} \
+          -O pileups.table
+    """
+
+    outputs = {"pileups": "pileups.table"
+              }
+
+    docker = GATK_docker_image
+
 
 class GatherPileupSummaries(Task):
-    pass
 
-class ComputeContamination(Task):
-    pass
+    inputs = {"all_pileups": None,
+              "ref_fasta_dict": None
+             }
+
+    def script(self):
+        # TODO need to create string " -I ".join(all_pileups)
+        pileup_ls = " -I ".join(self.inputs["all_pileups"])
+        result = """
+            set -euxo
+            gatk --java-options -Xmx2g GatherPileupSummaries \
+                    -I """ + pileup_ls + """\
+                 --sequence-dictionary ${ref_fasta_dict} -O pile.tsv
+        """
+
+        return result
+
+    outputs = {"gathered_pileup": "pile.tsv"
+              }
+
+    docker = GATK_docker_image
+
+
+class CalculateContamination(Task):
+
+    inputs = {"tumor_pile_tsv": None,
+              "normal_pile_tsv": None,
+              }
+
+    script = """
+        set -euxo
+        gatk --java-options -Xmx2g CalculateContamination \
+            -I ${tumor_pile_tsv} -O contamination.table \
+            --tumor-segmentation segments.table \
+            -matched ${normal_pile_tsv}
+    """
+    
+    outputs = {"contamination_table": "contamination.table",
+               "segments_table": "segments.table"
+              }
+
+    docker = GATK_docker_image
+
+
+class GatherLearnReadOrientationModel(Task):
+    
+    inputs = {"all_f1r2_input": None
+             }
+
+    def script(self):
+        # Need 
+        f1r2_str = " -I ".join(self.inputs["all_f1r2_input"])
+        result = """
+            set -euxo
+            gatk LearnReadOrientationModel \
+                -I ${all_f1r2_input} \
+                -O artifact-priors.tar.gz 
+        """
+
+    outputs = {"artifact_priors_targz": "artifact-priors.tar.gz"
+              }
+
 
 class FilterMutect2(Task):
     pass

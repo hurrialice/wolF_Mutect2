@@ -68,14 +68,46 @@ def mutect2_workflow(pair_name, t_name, n_name,
                          )
 
     # MuTect2 gather
-    m2g_outputs = GatherMutect2(inputs=dict(all_vcf_input=[m2_outputs["scatter_vcf"]]
+    m2g_outputs = MergeVCFs(inputs=dict(all_vcf_input=[m2_outputs["scatter_vcf"]]
                                            )
                                )
     results["merged_unfiltered_vcf"] = m2g_outputs["merged_unfiltered_vcf"]
 
-    # Pileup summary scatter
+    # Pileup summary scatter (for tumor and normal, separately)
+    tumor_pileups = GetPileupSummaries(inputs={
+                        "bam": t_bam, "bai": t_bai,
+                        "ref_fasta": ref_files["fasta"],
+                        "ref_fasta_index": ref_files["fasta_idx"],
+                        "ref_fasta_dict": ref_files["fasta_dict"],
+                        "contamination_vcf": ref_files["contamination_vcf"],
+                        "contamination_vcf_idx": ref_files["contamination_vcf_idx"],
+                        "interval" : intervals,
+                        "command_mem": "4",
+                        }
+                    )["pileups"]
+    normal_pileups = GetPileupSummaries(inputs={
+                        "bam": n_bam, "bai": n_bai,
+                        "ref_fasta": ref_files["fasta"],
+                        "ref_fasta_index": ref_files["fasta_idx"],
+                        "ref_fasta_dict": ref_files["fasta_dict"],
+                        "contamination_vcf": ref_files["contamination_vcf"],
+                        "contamination_vcf_idx": ref_files["contamination_vcf_idx"],
+                        "interval" : intervals,
+                        "command_mem": "4",
+                        }
+                    )["pileups"]
 
     # Pileup summary gather
+    tumor_pileup = GatherPileupSummaries(inputs={
+                       "all_pileups": [tumor_pileups],
+                       "ref_fasta_dict": ref_files["fasta_dict"],
+                       }
+                   )["gathered_pileup"]
+    normal_pileup = GatherPileupSummaries(inputs={
+                       "all_pileups": [normal_pileups],
+                       "ref_fasta_dict": ref_files["fasta_dict"],
+                       }
+                   )["gathered_pileup"]
 
     # Compute contamination
 
