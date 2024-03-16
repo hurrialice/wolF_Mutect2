@@ -13,6 +13,10 @@ m2_ref_files = {
         "contamination_vcf": "gs://gatk-best-practices/somatic-hg38/small_exac_common_3.hg38.vcf.gz",
         "contamination_vcf_idx": "gs://gatk-best-practices/somatic-hg38/small_exac_common_3.hg38.vcf.gz.tbi",
 
+        # Funcotator
+        "funco_data_sources_dir"    : "gs://getzlab-workflows-reference_files-oa/funcotator/funcotator_dataSources.v1.7.20200521s/",
+        "funco_transcript_selection_list" :  "gs://broad-public-datasets/funcotator/transcriptList.exact_uniprot_matches.AKT1_CRLF2_FGFR1.txt",
+
         "WGS": {
             "split_intervals": "gs://getzlab-workflows-reference_files-oa/hg38/final_hg38_wgs_masked_intervals.bed",
         },
@@ -32,6 +36,10 @@ m2_ref_files = {
         "contamination_vcf": "gs://gatk-best-practices/somatic-b37/small_exac_common_3.vcf",
         "contamination_vcf_idx": "gs://gatk-best-practices/somatic-b37/small_exac_common_3.vcf.idx",
         
+        # Funcotator
+        "funco_data_sources_dir"    : "gs://getzlab-workflows-reference_files-oa/funcotator/funcotator_dataSources.v1.7.20200521s/",
+        "funco_transcript_selection_list" :  "gs://broad-public-datasets/funcotator/transcriptList.exact_uniprot_matches.AKT1_CRLF2_FGFR1.txt",
+
         "WGS": {
             "split_intervals": "gs://broad-getzlab-wolf-wgs-hg19/additional_refs/M2.interval.CytoBand.acen.Blacklist.mask.12Oct2016.bed",
             "pon_vcf": "gs://gatk-best-practices/somatic-b37/Mutect2-WGS-panel-b37.vcf",

@@ -4,12 +4,6 @@ import pandas as pd
 
 from wolf import Task, ReadFile
 
-#GATK_docker_image = {
-#  "image": "broadinstitute/gatk",
-#  "tag": "4.1.4.1",
-#  "extra_flags" : {"volume" : "/home/qing/.config/gcloud:/etc/gcloud" }
-#}
-
 GATK_docker_image = 'gcr.io/broad-getzlab-workflows/gatk4_wolf:v6'
 
 class SplitIntervals(Task):
@@ -77,7 +71,8 @@ class Mutect2(Task):
         "pon_vcf_idx": None,
         "command_mem": "4",
         "interval" : "",
-        "extra_args": ""
+        "split_label": "0",
+        "extra_args": "",
     }
 
     script = """ 
@@ -126,14 +121,15 @@ class Mutect2(Task):
             --germline-resource ${gnomad_path} \
             -pon ${pon_path} \
             ${interval_str} \
-            -O scatter.vcf \
-            --f1r2-tar-gz f1r2.tar.gz \
+            -O scatter_${split_label}.vcf \
+            --f1r2-tar-gz f1r2_${split_label}.tar.gz \
             ${extra_args}
     """
 
     outputs = {
-      "scatter_vcf": "scatter.vcf*",
-      "f1r2": "f1r2.tar.gz"
+      "scatter_vcf": "scatter_*.vcf",
+      "scatter_vcf_stats": "*.stats",
+      "f1r2": "f1r2_*.tar.gz"
     }
     
     resources = {
@@ -145,17 +141,47 @@ class Mutect2(Task):
 
 class MergeVCFs(Task):
    
-    inputs = {"all_vcf_input": None}
+    inputs = {"all_vcfs": None}
 
     script = """
+        set -euxo
+        
+        # Need all vcf files, separated by " -I "
+        vcfs_str=$(python -c 'import sys;print(" -I ".join([l.strip() for l in sys.stdin]))' < ${all_vcfs})
+
         gatk MergeVcfs \
-            -I ${all_vcf_input} \
+            -I $vcfs_str \
             -O merged_unfiltered.vcf
     """
 
-    outputs = {"merged_unfiltered_vcf": "merged_unfiltered.vcf"}
+    outputs = {"merged_unfiltered_vcf": "merged_unfiltered.vcf"
+              }
+
+    resources = {"mem": "4GB"
+                }
 
     docker = GATK_docker_image
+
+
+class MergeMutectStats(Task):
+   
+    inputs = {"all_stats": None}
+
+    script = """
+        set -euxo
+
+        # Need all stats files, separated by " -stats "
+        stats_str=$(python -c 'import sys;print(" -stats ".join([l.strip() for l in sys.stdin]))' < ${all_stats})
+
+        gatk MergeMutectStats \
+            -stats $stats_str \
+            -O merged.stats
+    """
+
+    outputs = {"merged_stats": "merged.stats"}
+
+    docker = GATK_docker_image
+
 
 
 class GetPileupSummaries(Task):
@@ -169,6 +195,7 @@ class GetPileupSummaries(Task):
         "contamination_vcf_idx": None,
         "interval" : "",
         "command_mem": "4",
+        "split_label": "0"
     }
 
     script = """
@@ -204,10 +231,10 @@ class GetPileupSummaries(Task):
           -I ${bam} --interval-set-rule INTERSECTION \
           ${interval_str} \
           -V ${contamination_vcf_path} -L ${contamination_vcf_path} \
-          -O pileups.table
+          -O pileups_${split_label}.table
     """
 
-    outputs = {"pileups": "pileups.table"
+    outputs = {"pileups": "pileups_*.table"
               }
 
     docker = GATK_docker_image
@@ -219,17 +246,18 @@ class GatherPileupSummaries(Task):
               "ref_fasta_dict": None
              }
 
-    def script(self):
-        # TODO need to create string " -I ".join(all_pileups)
-        pileup_ls = " -I ".join(self.inputs["all_pileups"])
-        result = """
-            set -euxo
-            gatk --java-options -Xmx2g GatherPileupSummaries \
-                    -I """ + pileup_ls + """\
-                 --sequence-dictionary ${ref_fasta_dict} -O pile.tsv
-        """
+    script = """
+        set -euxo
 
-        return result
+        # Need all pileup files, separated by "-I"
+        pileups_str=$(python -c 'import sys;print(" -I ".join([l.strip() for l in sys.stdin]))' < ${all_pileups})
+
+        gatk --java-options -Xmx2g GatherPileupSummaries \
+                -I $pileups_str \
+                --sequence-dictionary ${ref_fasta_dict} \
+                -O pile.tsv
+    """
+
 
     outputs = {"gathered_pileup": "pile.tsv"
               }
@@ -260,31 +288,144 @@ class CalculateContamination(Task):
 
 class GatherLearnReadOrientationModel(Task):
     
-    inputs = {"all_f1r2_input": None
+    inputs = {"all_f1r2_input": None,
+              "command_mem": 6, 
              }
 
-    def script(self):
-        # Need 
-        f1r2_str = " -I ".join(self.inputs["all_f1r2_input"])
-        result = """
-            set -euxo
-            gatk LearnReadOrientationModel \
-                -I ${all_f1r2_input} \
-                -O artifact-priors.tar.gz 
-        """
+    script = """
+        set -euxo
+
+        # Need all f1r2 files, separated by " -I "
+        f1r2_str=$(python -c 'import sys;print(" -I ".join([l.strip() for l in sys.stdin]))' < ${all_f1r2_input})
+
+        gatk LearnReadOrientationModel \
+            --java-options "-Xmx${command_mem}g" \
+            -I $f1r2_str \
+            -O artifact-priors.tar.gz 
+    """
 
     outputs = {"artifact_priors_targz": "artifact-priors.tar.gz"
               }
 
+    resources = { "mem": "8GB"
+                }
+
+    docker = GATK_docker_image
+
 
 class FilterMutect2(Task):
-    pass
+
+    inputs = {"vcf": None,
+              "vcf_stats": None,
+              "ref_fasta": None,
+              "ref_fasta_idx": None,
+              "ref_fasta_dict": None,
+              "contamination_table": None,
+              "segments_table": None,
+              "artifact_priors_targz": None,
+              "command_mem": 6
+             }
+
+    script = """
+        set -euxo
+
+        # Standardize ref fasta file names
+        ln -s ${ref_fasta} refbuild.fa
+        ln -s ${ref_fasta_idx} refbuild.fa.fai
+        ln -s ${ref_fasta_dict} refbuild.dict
+
+        gatk FilterMutectCalls \
+            --java-options "-Xmx${command_mem}g" \
+            -V ${vcf} \
+            -R refbuild.fa \
+            --contamination-table ${contamination_table} \
+            --tumor-segmentation ${segments_table} \
+            --ob-priors ${artifact_priors_targz} \
+            -stats ${vcf_stats} \
+            --filtering-stats filtering.stats \
+            -O merged_filtered.vcf 
+    """
+    
+    outputs = {"filtered_vcf": "merged_filtered.vcf",
+               "filter_stats": "filtering.stats"
+              }
+   
+    resources = {"mem": "8GB"
+                }
+
+    docker = GATK_docker_image
+
 
 class FilterAlignmentArtifacts(Task):
-    pass
+    #TODO FINISH IMPLEMENTING THIS 
+    inputs = {"vcf": None,
+              "tumor_bam": None,
+              "tumor_bai": None,
+              "ref_fasta": None,
+              "ref_fasta_idx": None,
+              "ref_fasta_dict": None,
+              "bwamem_index_image": None,
+              "command_mem": 6
+             }
+
+    script = """
+        set -euxo pipefail
+
+        gatk --java-options "-Xmx${command_mem}g" FilterAlignmentArtifacts \
+          -V ${vcf} -R refbuild.fa \
+          -I ${bam} \
+          --bwa-mem-index-image ${bwamem_index_image} \
+          -O realigned_filtered.vcf
+
+    """
+    
+    outputs = {"filtered_vcf": "realigned_filtered.vcf"}
+
+    resources = {"mem": "8GB"
+                }
+
+    docker = GATK_docker_image
+
 
 class Funcotator(Task):
-    pass
+
+    inputs = {"vcf": None,
+              "data_sources_dir": None,
+              "transcript_selection": None,
+              "ref_build": None,
+              "ref_fasta": None,
+              "ref_fasta_idx": None,
+              "ref_fasta_dict": None,
+              "command_mem": 12,
+              "output_format": "MAF",
+            }
+
+    script = """
+        set -euxo
+
+        # Standardize fasta filenames
+        ln -s ${ref_fasta} ref.fa
+        ln -s ${ref_fasta_idx} ref.fa.fai
+        ln -s ${ref_fasta_dict} ref.dict
+
+        gatk --java-options "-Xmx${command_mem}g" Funcotator \
+          --data-sources-path ${data_sources_dir} \
+          --transcript-list ${transcript_selection} \
+          --ref-version ${ref_build} \
+          --output-file-format ${output_format} \
+          --remove-filtered-variants true \
+          -V ${vcf} \
+          -R ref.fa \
+          -O annot.${output_format} \
+    """
+    
+    outputs = {"annotated_output": "annot.*"
+              }
+
+    resources = {"mem": "16GB"
+                }
+
+    docker = GATK_docker_image
 
 
 ############################################################
