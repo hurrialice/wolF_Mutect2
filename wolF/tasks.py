@@ -289,7 +289,7 @@ class CalculateContamination(Task):
 class GatherLearnReadOrientationModel(Task):
     
     inputs = {"all_f1r2_input": None,
-              "command_mem": 6, 
+              "command_mem": 7, 
              }
 
     script = """
@@ -323,7 +323,7 @@ class FilterMutect2(Task):
               "contamination_table": None,
               "segments_table": None,
               "artifact_priors_targz": None,
-              "command_mem": 6
+              "command_mem": 7
              }
 
     script = """
