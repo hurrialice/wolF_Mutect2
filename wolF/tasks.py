@@ -69,7 +69,7 @@ class Mutect2(Task):
         "gnomad_vcf_idx": None,
         "pon_vcf": None,
         "pon_vcf_idx": None,
-        "command_mem": "4",
+        "command_mem": "7",
         "interval" : "",
         "split_label": "0",
         "extra_args": "",
@@ -133,7 +133,7 @@ class Mutect2(Task):
     }
     
     resources = {
-        "mem" : "6G",
+        "mem" : "8G",
         "cpus-per-task" : 1
     }
     docker = GATK_docker_image
@@ -237,6 +237,9 @@ class GetPileupSummaries(Task):
     outputs = {"pileups": "pileups_*.table"
               }
 
+    resources = {"mem": "4GB"
+                }
+
     docker = GATK_docker_image
 
 
@@ -289,7 +292,7 @@ class CalculateContamination(Task):
 class GatherLearnReadOrientationModel(Task):
     
     inputs = {"all_f1r2_input": None,
-              "command_mem": 7, 
+              "command_mem": 15, 
              }
 
     script = """
@@ -307,7 +310,7 @@ class GatherLearnReadOrientationModel(Task):
     outputs = {"artifact_priors_targz": "artifact-priors.tar.gz"
               }
 
-    resources = { "mem": "8GB"
+    resources = { "mem": "16GB"
                 }
 
     docker = GATK_docker_image
@@ -365,7 +368,7 @@ class FilterAlignmentArtifacts(Task):
               "ref_fasta_idx": None,
               "ref_fasta_dict": None,
               "bwamem_index_image": None,
-              "command_mem": 6
+              "command_mem": 7
              }
 
     script = """
@@ -396,7 +399,7 @@ class Funcotator(Task):
               "ref_fasta": None,
               "ref_fasta_idx": None,
               "ref_fasta_dict": None,
-              "command_mem": 12,
+              "command_mem": 15,
               "output_format": "MAF",
             }
 
